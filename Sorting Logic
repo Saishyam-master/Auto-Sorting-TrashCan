@@ -1,0 +1,60 @@
+import cv2
+import numpy as np
+import time
+import tflite_runtime.interpreter as tflite
+
+# Load TFLite model
+interpreter = tflite.Interpreter(model_path="model.tflite")
+interpreter.allocate_tensors()
+
+# Get model input details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Load reference empty trash can image
+empty_img = cv2.imread("empty_trashcan.jpg", cv2.IMREAD_GRAYSCALE)
+
+# Initialize camera
+cap = cv2.VideoCapture(0)  # Use 0 for built-in camera
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        continue
+
+    # Convert to grayscale and compare with empty image
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    diff = cv2.absdiff(empty_img, gray)
+    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+
+    if np.count_nonzero(thresh) > 5000:  # If significant change is detected
+        print("Object detected! Running classification...")
+
+        # Resize frame for model input
+        img_resized = cv2.resize(frame, (input_details[0]['shape'][1], input_details[0]['shape'][2]))
+        img_resized = np.expand_dims(img_resized, axis=0).astype(np.float32)
+
+        # Run inference
+        interpreter.set_tensor(input_details[0]['index'], img_resized)
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+
+        # Get predicted class
+        predicted_class = np.argmax(output_data)
+        print(f"Predicted class: {predicted_class}")
+
+        # Activate servo motors based on classification
+        if predicted_class == 0:
+            print("Sending item to Recycling bin...")
+            activate_servo(0)
+        elif predicted_class == 1:
+            print("Sending item to Compost bin...")
+            activate_servo(1)
+        else:
+            print("Sending item to Landfill bin...")
+            activate_servo(2)
+
+    time.sleep(0.5)  # Wait before next frame check
+
+cap.release()
+cv2.destroyAllWindows()
